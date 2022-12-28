@@ -258,6 +258,7 @@ int main(int argc, char *argv[]){
         alarm(INTERVALO_TIMER);
         signal(SIGALRM,alarmHandler);
         wait(NULL); //Espera a Server
+
         //Cuenta el número de lineas que es igual al numero de prímos encontrados
         printf("Resultado: %ld primos detectados\n",contarLineas());
         exit(0);
@@ -265,30 +266,34 @@ int main(int argc, char *argv[]){
 }
 
 int comprobarSiEsPrimo(long int numero) {
-    if (numero < 2) return 0; // Por convenio 0 y 1 no son primos ni compuestos
-    else
-        for (int x = 2; x <= (numero / 2) ; x++)
+    if (numero < 2) {
+        return 0; // Por convenio 0 y 1 no son primos ni compuestos
+    }else{
+        for (int x = 2; x <= (numero / 2); x++){
             if (numero % x == 0) return 0;
+        }
+    }
     return 1;
 }
 
 void imprimirJerarquiaPorcesos(int pidRaiz, int pidServidor, int *pidHijos, int numHijos){
     printf("\n");
-    printf("RAIZ\tSERV\tCALC\n"); ///LÃ­nea de cabecera separado por tabulaciÃ³n
-    printf("%d\t%d\t%d\n",pidRaiz,pidServidor,pidHijos[0]);//LÃ­nea con proceso raÃ­z, servidor y primer hijo
+    printf("RAIZ\tSERV\tCALC\n"); //Cabecera
+    printf("%d\t%d\t%d\n",pidRaiz,pidServidor,pidHijos[0]);
+
     for (int k=1; k < numHijos; k++){
         printf("\t\t\t%d\n",pidHijos[k]); ///Resto de hijos
     }
     printf("\n");
 }
-///Muestra por la consola el texto si verboso==1
+
+//Si verboso == 1, imprime por consola
 void informar(char *texto, int verboso){
     if(verboso){
         printf("%s",texto);
     }
 }
 
-///Contar las lÃ­neas del fichero primos.txt para saber cuÃ¡ntos se han encontrado
 long int contarLineas(){
 
     long int count = 0;
@@ -305,7 +310,7 @@ long int contarLineas(){
 
 
 
-///Manejador de la alarma en el proceso RAÃZ
+//Maneja las alarmas del proceso raíz
 void alarmHandler(int signo){
 
     FILE *ficheroCuentaPrimos;

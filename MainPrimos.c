@@ -91,11 +91,176 @@ int main(int argc, char *argv[]){
     char info[LONGITUD_MSG_INFO_ERR];
 
     //Control de finalización
-    int numeroCalculadoresFinalizados=0;
-    long int numerosPrimosEncontrados=0;
+    int numeroCalculadoresFinalizados = 0;
+    long int numerosPrimosEncontrados = 0;
 
     //Ficheros
     FILE *ficheroSalida, *ficheroCuentaPrimos;
 
-    return 0;
+    
+    rootPid = getpid();
+    //Creación del Server
+    pid = fork();
+
+    if (pid == 0) {             //Server es raiz si pid==0
+        pid = getpid();
+        serverPid = pid;        //Pid del Server
+        currentPid = serverPid; //Decimos que se está ejecutando el server
+        
+        //Creación de cola de mensajes
+        if ((keyQueue = ftok("/tmp",'C') == -1)){
+            perror("Error en la creación de la queue key");
+            exit(ERR_GET_QUEUE_KEY);
+        }
+        
+
+        if ((messageQueueId = msgget(keyQueue, IPC_CREAT | 0666) ) == -1) {
+            perror("Error en la creación de la queue");
+            exit(ERR_CREATE_QUEUE);
+        }
+
+        //Visualización de la Message Queue Id
+        printf("Server: Message queue id =%u\n",messageQueueId);
+
+        //Se crean los procesos calculadores hijos del Server
+        i = 0;
+
+        while(i<numHijos){
+            if (pid > 0){                   //Aseguramos que el padre es el Server
+                pid = fork();
+                if (pid == 0){              ///Rama hijo CALCulador
+                    parentPid = getppid();  // Asignamos la Pid del padre
+                    currentPid = getpid();  // Decimos que se está ejecutando un calculador
+                    printf("Ha nacido un hijo calculdador %d, ordinal de hijo %d\n",currentPid,i);
+                }
+            }
+            i++;
+        }
+
+        if (currentPid != serverPid){                   //Solo si es un calculador debe iterar
+
+            message.msg_type = MSG_COD_ESTOY_AQUI;      //Indicamos que el mensaje es el de aviso de listo para funcionar
+            sprintf(message.msg_text,"%d",currentPid);
+            msgsnd(messageQueueId,&message, sizeof(message), IPC_NOWAIT);
+
+            message.msg_type = MSG_COD_LIMITES;
+
+            //Espera a recibir los límites de iteración
+
+            msgrcv(messageQueueId,&message, sizeof(message), MSG_COD_LIMITES,0);
+            sscanf(message.msg_text,"%ld %ld",&base_hijo,&limite_hijo);
+            printf("Child says: He recibido mi intervalo de iteración [%ld,%ld)\n",base_hijo,limite_hijo);
+
+            for (long int numero = base_hijo; numero < limite_hijo; numero++) {
+                if (comprobarSiEsPrimo(numero)) {
+                    //Se manda el mensaje de haber encontrado un primo
+                    message.msg_type = MSG_COD_RESULTADOS;
+                    sprintf(message.msg_text, "%d %ld", currentPid, numero);
+                    msgsnd(messageQueueId, &message, sizeof(message), IPC_NOWAIT);
+                }
+            }
+            //Enviamos un mensaje al finalizar
+            message.msg_type = MSG_COD_FIN;
+            sprintf(message.msg_text, "%d", currentPid);
+            msgsnd(messageQueueId, &message, sizeof(message), IPC_NOWAIT);
+
+
+        } else { //Si no es un calculador es el server
+        
+            pidHijos = (int*) malloc(numHijos* sizeof(int));
+            printf("Hijos creados pero a la espera de enviarles trabajo\n");
+
+            for (j = 0; j<numHijos;j++){ //Recibe los mensajes del calculador listo
+                msgrcv(messageQueueId,&message,sizeof(message),MSG_COD_ESTOY_AQUI,0);
+                sscanf(message.msg_text,"%d",&pidHijos[j]);
+            }
+
+            //Cuando están listos indica los intervalos de iteración
+
+            intervalo_hijo = (int) (RANGO_BUSQUEDA/numHijos);
+
+            message.msg_type = MSG_COD_LIMITES;
+            for(j = 0; j<numHijos; j++){
+                
+                base_hijo = BASE + (intervalo_hijo*j);
+                limite_hijo = base_hijo + intervalo_hijo;
+
+                if (j == (numHijos-1)){
+                    limite_hijo = LIMITE+1;
+                }
+
+                sprintf(message.msg_text,"%ld %ld",base_hijo, limite_hijo);
+                msgsnd(messageQueueId,&message, sizeof(message), IPC_NOWAIT);
+                printf("Server says: send limits to my child%d, [%ld,%ld) \n",j,base_hijo,limite_hijo);
+
+            }
+
+            //Se va escribiendo la jerarquía de procesos
+            imprimirJerarquiaPorcesos(rootPid,serverPid,pidHijos,numHijos);
+            
+
+            if((ficheroSalida = fopen(NOMBRE_FICHERO_SALIDA,"w")) == NULL){
+                perror("Error al crear el fichero de salida");
+                exit(ERR_FSAL);
+            }
+            printf("Se ha creado el fichero de salida primos.txt\n");
+
+            time(&startTime); //Se inicia el timer 
+
+            while(numeroCalculadoresFinalizados < numHijos){
+
+                if(msgrcv(messageQueueId, &message, sizeof(message),0,0)==-1){
+                    perror("Server: msgrcv failed\n");
+                    exit(ERR_RECV);
+                }
+                
+                if (message.msg_type == MSG_COD_RESULTADOS){
+
+                    int numeroPrimo;
+
+                    //Dividimos el Pid del calculador y el número primo
+                    sscanf(message.msg_text,"%d %d",&pidCalculador,&numeroPrimo);
+
+                    //Imprimimos por consola
+                    sprintf(info,"MSG %ld : %s\n" ,++numerosPrimosEncontrados,message.msg_text);
+                    informar(info,verbosity);
+                    fprintf(ficheroSalida,"%d\n",numeroPrimo);
+
+                    ///Si se ha recibido un número de primos dvisible por 5 se escribe en cuentaprimos.txt
+                    if (numerosPrimosEncontrados % FRECUENCIA_ESCRITURA_CUENTA_PRIMOS ==0){
+                        ficheroCuentaPrimos = fopen(NOMBRE_FICHERO_CUENTA_PRIMOS,"w");
+                        fprintf(ficheroCuentaPrimos,"%ld\n",numerosPrimosEncontrados);
+                        fclose(ficheroCuentaPrimos);
+                    }
+
+                } else if (message.msg_type == MSG_COD_FIN){
+
+                    //Imprimimos por consola
+                    numeroCalculadoresFinalizados++;
+                    sprintf(info,"FIN %d %s\n",numeroCalculadoresFinalizados,message.msg_text);
+                    informar(info,verbosity);
+                } else {
+                    perror("Server se ha encontrado con un mensaje no esperado\n");
+                    exit(ERR_MSG_NOT_EXPECTED);
+                }
+            }
+
+            time(&endTime); //Al finalizar se para el timer
+            double dif = difftime(endTime,startTime);
+            printf("Server: Tiempo total de computaciÃ³n: %.2lf seconds,\n",dif);
+            msgctl(messageQueueId, IPC_RMID, NULL);
+            fflush(ficheroSalida);
+            fclose(ficheroSalida);
+            exit(0);
+        }
+    } else { //Rama del proceso raíz
+    
+        alarm(INTERVALO_TIMER);
+        signal(SIGALRM,alarmHandler);
+        wait(NULL); //Espera a Server
+
+        printf("Resultado: %ld primos detectados\n",contarLineas());
+        exit(0);
+    }
+
 }

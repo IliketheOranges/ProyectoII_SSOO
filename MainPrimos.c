@@ -109,13 +109,13 @@ int main(int argc, char *argv[]){
         
         //Creación de cola de mensajes
         if ((keyQueue = ftok("/tmp",'C') == -1)){
-            perror("Error en la creación de la queue key");
+            perror("Error al crear la System V IPC key");
             exit(ERR_GET_QUEUE_KEY);
         }
         
 
         if ((messageQueueId = msgget(keyQueue, IPC_CREAT | 0666) ) == -1) {
-            perror("Error en la creación de la queue");
+            perror("Fallo al crear la System V IPC queue");
             exit(ERR_CREATE_QUEUE);
         }
 
@@ -209,7 +209,7 @@ int main(int argc, char *argv[]){
 
             while(numeroCalculadoresFinalizados < numHijos){
 
-                if(msgrcv(messageQueueId, &message, sizeof(message),0,0)==-1){
+                if(msgrcv(messageQueueId, &message, sizeof(message),0,0) == -1){
                     perror("Server: msgrcv failed\n");
                     exit(ERR_RECV);
                 }
@@ -247,20 +247,75 @@ int main(int argc, char *argv[]){
 
             time(&endTime); //Al finalizar se para el timer
             double dif = difftime(endTime,startTime);
-            printf("Server: Tiempo total de computaciÃ³n: %.2lf seconds,\n",dif);
+            printf("Server: Tiempo total de computación: %.2lf seconds,\n",dif);
             msgctl(messageQueueId, IPC_RMID, NULL);
             fflush(ficheroSalida);
             fclose(ficheroSalida);
             exit(0);
         }
     } else { //Rama del proceso raíz
-    
+
         alarm(INTERVALO_TIMER);
         signal(SIGALRM,alarmHandler);
         wait(NULL); //Espera a Server
-
+        //Cuenta el número de lineas que es igual al numero de prímos encontrados
         printf("Resultado: %ld primos detectados\n",contarLineas());
         exit(0);
     }
+}
 
+int comprobarSiEsPrimo(long int numero) {
+    if (numero < 2) return 0; // Por convenio 0 y 1 no son primos ni compuestos
+    else
+        for (int x = 2; x <= (numero / 2) ; x++)
+            if (numero % x == 0) return 0;
+    return 1;
+}
+
+void imprimirJerarquiaPorcesos(int pidRaiz, int pidServidor, int *pidHijos, int numHijos){
+    printf("\n");
+    printf("RAIZ\tSERV\tCALC\n"); ///LÃ­nea de cabecera separado por tabulaciÃ³n
+    printf("%d\t%d\t%d\n",pidRaiz,pidServidor,pidHijos[0]);//LÃ­nea con proceso raÃ­z, servidor y primer hijo
+    for (int k=1; k < numHijos; k++){
+        printf("\t\t\t%d\n",pidHijos[k]); ///Resto de hijos
+    }
+    printf("\n");
+}
+///Muestra por la consola el texto si verboso==1
+void informar(char *texto, int verboso){
+    if(verboso){
+        printf("%s",texto);
+    }
+}
+
+///Contar las lÃ­neas del fichero primos.txt para saber cuÃ¡ntos se han encontrado
+long int contarLineas(){
+
+    long int count = 0;
+    long int numeroPrimo;
+    FILE *ficheroPrimos;
+
+    ficheroPrimos = fopen(NOMBRE_FICHERO_SALIDA,"r");
+    while(fscanf(ficheroPrimos,"%ld",&numeroPrimo) != EOF){
+        count++;   
+    }
+    fclose(ficheroPrimos);
+    return count;
+}
+
+
+
+///Manejador de la alarma en el proceso RAÃZ
+void alarmHandler(int signo){
+
+    FILE *ficheroCuentaPrimos;
+    int numeroPrimosEncontrados = 0;
+    computoTotalSegundos += INTERVALO_TIMER;
+
+    if ((ficheroCuentaPrimos = fopen(NOMBRE_FICHERO_CUENTA_PRIMOS,"r"))!= NULL){
+        fscanf(ficheroCuentaPrimos,"%d",&numeroPrimosEncontrados);
+        fclose(ficheroCuentaPrimos);
+    }
+    printf("%02d (segs): %d primos encontrados\n",computoTotalSegundos,numeroPrimosEncontrados);
+    alarm(INTERVALO_TIMER);
 }
